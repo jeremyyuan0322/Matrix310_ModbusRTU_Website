@@ -5,11 +5,13 @@
 #include "src/index.h"
 #include <ESPAsyncWebServer.h>
 #include <string.h>
-#include<stdlib.h>
+#include <stdlib.h>
+#include "src/Artila-Matrix310.h"
+//#include <WebServer.h>
 // RS-485
-#define COM1_RX 16 // out
-#define COM1_TX 17 // in
-#define COM1_RTS 4 // request to send
+// #define COM1_RX 16 // out
+// #define COM1_TX 17 // in
+// #define COM1_RTS 4 // request to send
 
 const char *ssid = "Artila";
 const char *password = "CF25B34315";
@@ -66,32 +68,16 @@ void wifiConnect()
     Serial.print("paramsNr: ");
     Serial.println(paramsNr);
     if(paramsNr==4){
-      // AsyncWebParameter* p= req->getParam(0);
-      // writeStr=p->value();
       Serial.println(sizeof(atoi((req->getParam(0)->value()).c_str())));
       Serial.println(atoi((req->getParam(0)->value()).c_str()),HEX);
       Serial.println(atoi((req->getParam(1)->value()).c_str()),HEX);
       Serial.println(atoi((req->getParam(2)->value()).c_str()),HEX);
       Serial.println(atoi((req->getParam(3)->value()).c_str()),HEX);
 
-      // slave_id=*((u_int8_t *)(atoi((req->getParam(0)->value()).c_str())));
-      // func=*((u_int8_t *)(atoi((req->getParam(0)->value()).c_str())));
-      // *(u_int16_t *)reg_addr=*((u_int16_t *)(atoi((req->getParam(0)->value()).c_str())));
-      // *(u_int16_t *)read_count=*((u_int16_t *)(atoi((req->getParam(0)->value()).c_str())));
-      // *(u_int8_t *)mod_write.slave_id=*(u_int8_t *)(atoi((req->getParam(0)->value()).c_str()));//1U=1byte
-      // *(u_int8_t *)mod_write.func=*(u_int8_t *)(atoi((req->getParam(1)->value()).c_str()));
-      // *(u_int16_t *)mod_write.reg_addr=*(u_int16_t *)(atoi((req->getParam(2)->value()).c_str()));//2U
-      // *(u_int16_t *)mod_write.read_count=*(u_int16_t *)(atoi((req->getParam(3)->value()).c_str()));//atoi(int): 4UL
-
       mod_write.slave_id=strtol(((req->getParam(0)->value()).c_str()),NULL,16);//1U=1byte
       mod_write.func=strtol(((req->getParam(1)->value()).c_str()),NULL,16);
       *(u_int16_t*)mod_write.reg_addr=htons(strtol(((req->getParam(2)->value()).c_str()),NULL,16));//2U
       *(u_int16_t*)mod_write.read_count=htons(strtol(((req->getParam(3)->value()).c_str()),NULL,16));//atoi(int): 4UL
-
-      // *(u_int8_t *)mod_write.slave_id=slave_id;
-      // *(u_int8_t *)mod_write.func=func;
-      // *(u_int16_t *)mod_write.reg_addr=reg_addr;
-      // *(u_int16_t *)mod_write.read_count=read_count;
     }
     String s = MAIN_page;             // Read HTML contents
     req->send(200, "text/html", s); });
@@ -194,7 +180,8 @@ void setup()
   // Modbus communication runs at 115200 baud
   Serial.begin(115200);
   Serial.setTimeout(100);
-  Serial2.begin(9600);
+  //Serial2.begin(9600);//Serial2.begin(9600,SERIAL_8N1, COM1_RX,COM1_TX);
+  Serial2.begin(9600,SERIAL_8N1, COM1_RX,COM1_TX);
   Serial2.setTimeout(100);
   pinMode(COM1_RTS, OUTPUT);
   digitalWrite(COM1_RTS, HIGH); // write
