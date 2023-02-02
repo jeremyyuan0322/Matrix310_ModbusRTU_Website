@@ -1,18 +1,20 @@
-#include <WiFi.h>      //server.onRequestBody
-#include <arpa/inet.h> //classWebServer.on
+#include <WiFi.h>      
+#include <arpa/inet.h> //htons
 #include "src/crc16.h"
 #include "src/rtu.h"
 #include "src/index.h"
 #include <ESPAsyncWebServer.h>
 #include <string.h>
 #include <stdlib.h>
-#include <time.h>
+// #include <time.h>
+#include <NTPClient.h>
 #include "src/Artila-Matrix310.h"
 // RS-485
 // #define COM1_RX 16 // out
 // #define COM1_TX 17 // in
 // #define COM1_RTS 4 // request to send
-
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP);
 const char *ssid = "Artila";
 const char *password = "CF25B34315";
 AsyncWebServer server(80);
@@ -61,7 +63,7 @@ void wifiConnect()
   Serial.println("WiFi connected.");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
-
+  timeClient.begin();
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *req)
   {
     int paramsNr = req->params();
@@ -95,6 +97,10 @@ void wifiConnect()
     {
       serialPrint();
     }
+    timeClient.update();//NTP
+    Serial.print("TIME: ");
+    Serial.println(timeClient.getFormattedTime());
+
     u_int16_t co2 = htons(*(u_int16_t *)(&mod_read.slave_id + 3));
     u_int16_t temp = htons(*(u_int16_t *)(&mod_read.slave_id + 5));
     u_int16_t rh = htons(*(u_int16_t *)(&mod_read.slave_id + 7));
