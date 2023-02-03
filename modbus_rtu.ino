@@ -1,19 +1,19 @@
-#include <WiFi.h>
+#include "src/Artila-Matrix310.h"
+
 #include <arpa/inet.h>  //htons
 #include "src/crc16.h"
 #include "src/rtu.h"
 #include "src/index.h"
-#include <ESPAsyncWebServer.h>
+#include "AsyncJson.h"
+// #include <ESPAsyncWebServer.h>
+#include <WiFi.h>
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>//?
 #include <NTPClient.h>
+#include <AsyncJson.h>
 // #include <ArduinoJson.h>
-#include "src/Artila-Matrix310.h"
-// RS-485
-// #define COM1_RX 16 // out
-// #define COM1_TX 17 // in
-// #define COM1_RTS 4 // request to send
+StaticJsonDocument<128> jsonDocument;
 WiFiUDP ntpUDP;
 //原本是格林威治時間，台灣+8(28800sec)
 NTPClient timeClient(ntpUDP, "tw.pool.ntp.org", 28800);
@@ -60,27 +60,12 @@ void wifiConnect() {
   Serial.println("WiFi connected.");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
-  timeClient.begin();
+}
+void setupRouting(){
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *req) {
-    int paramsNr = req->params();
-    Serial.print("paramsNr: ");
-    Serial.println(paramsNr);
-    if (paramsNr == 4) {
-      Serial.println(sizeof(atoi((req->getParam(0)->value()).c_str())));
-      Serial.println(atoi((req->getParam(0)->value()).c_str()), HEX);
-      Serial.println(atoi((req->getParam(1)->value()).c_str()), HEX);
-      Serial.println(atoi((req->getParam(2)->value()).c_str()), HEX);
-      Serial.println(atoi((req->getParam(3)->value()).c_str()), HEX);
-
-      mod_write.slave_id = strtol(((req->getParam(0)->value()).c_str()), NULL, 16);  //1U=1byte
-      mod_write.func = strtol(((req->getParam(1)->value()).c_str()), NULL, 16);
-      *(u_int16_t *)mod_write.reg_addr = htons(strtol(((req->getParam(2)->value()).c_str()), NULL, 16));    //2U
-      *(u_int16_t *)mod_write.read_count = htons(strtol(((req->getParam(3)->value()).c_str()), NULL, 16));  //atoi(int): 4UL
-    }
     String s = MAIN_page;  // Read HTML contents
     req->send(200, "text/html", s);
   });
-
   server.on("/modbus", HTTP_GET, [](AsyncWebServerRequest *req) {
     if (printFin = true) {
       rtuWrite();
@@ -91,10 +76,6 @@ void wifiConnect() {
     if (readLen > 0) {
       serialPrint();
     }
-    timeClient.update();  //NTP
-    Serial.print("TIME: ");
-    Serial.println(timeClient.getFormattedTime());
-
     u_int16_t co2 = htons(*(u_int16_t *)(&mod_read.slave_id + 3));
     u_int16_t temp = htons(*(u_int16_t *)(&mod_read.slave_id + 5));
     u_int16_t rh = htons(*(u_int16_t *)(&mod_read.slave_id + 7));
@@ -153,6 +134,19 @@ void rtuRead() {
     }
   }
 }
+void create_json(char *tag, float value, char *unit) {  
+  jsonDocument.clear();  
+  jsonDocument["type"] = tag;
+  jsonDocument["value"] = value;
+  jsonDocument["unit"] = unit;
+  serializeJson(jsonDocument, buffer);
+}
+void addJsonObject(char *tag, float value, char *unit) {
+  JsonObject obj = jsonDocument.createNestedObject();
+  obj["type"] = tag;
+  obj["value"] = value;
+  obj["unit"] = unit; 
+}
 void serialPrint() {
   Serial.print("data receive: ");
   Serial.println(readLen);
@@ -191,6 +185,9 @@ void setup() {
   memset(&mod_write, 0, sizeof(mod_write));
   memset(&mod_read, 0, sizeof(mod_read));
   wifiConnect();
+  timeClient.begin();
+  setupRouting();
+
 }
 void loop() {
 }
