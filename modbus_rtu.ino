@@ -3,7 +3,6 @@
 #include <arpa/inet.h>  //htons
 #include "src/crc16.h"
 #include "src/rtu.h"
-#include "src/index.h"
 #include "AsyncJson.h"
 // #include <ESPAsyncWebServer.h>
 #include <WiFi.h>
@@ -12,7 +11,7 @@
 #include <time.h>//?
 #include <NTPClient.h>
 #include <AsyncJson.h>
-// #include <ArduinoJson.h>
+#include <ArduinoJson.h>
 StaticJsonDocument<128> jsonDocument;
 WiFiUDP ntpUDP;
 //原本是格林威治時間，台灣+8(28800sec)
@@ -66,21 +65,24 @@ void setupRouting(){
     String s = "CO2 Meter!";  // Read HTML contents
     req->send(200, "text/plain", s);
   });
-  server.on("/co2meter", HTTP_POST, [](AsyncWebServerRequest *req) {
-    if (printFin = true) {
-      rtuWrite();
-    }
-    if (writeFin = true) {
-      rtuRead();
-    }
-    if (readLen > 0) {
-      serialPrint();
-    }
-    u_int16_t co2 = htons(*(u_int16_t *)(&mod_read.slave_id + 3));
-    u_int16_t temp = htons(*(u_int16_t *)(&mod_read.slave_id + 5));
-    u_int16_t rh = htons(*(u_int16_t *)(&mod_read.slave_id + 7));
-    req->send(200, "text/plain", String(co2) + String(" ") + String(temp / 100.0) + String(" ") + String(rh / 100.0) + String(" "));//co2不能大於1000
+
+  // server.on("/co2meter", HTTP_POST, [](AsyncWebServerRequest *req) {
+    
+  //   req->send(200, "application/json", jsonStr);//co2不能大於1000
+  // });
+
+  server.on("/json", HTTP_POST, [](AsyncWebServerRequest * request) {
+
+    AsyncJsonResponse * response = new AsyncJsonResponse();
+    JsonObject& root = response->getRoot();
+    root["key1"] = "key number one";
+    JsonObject& nested = root.createNestedObject("nested");
+    nested["key1"] = "key number one";
+
+    response->setLength();
+    request->send(response);
   });
+
   server.on("/time", HTTP_GET, [](AsyncWebServerRequest *req) {
     timeClient.update();  //NTP
     // Serial.print("TIME: ");
