@@ -63,10 +63,10 @@ void wifiConnect() {
 }
 void setupRouting(){
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *req) {
-    String s = MAIN_page;  // Read HTML contents
-    req->send(200, "text/html", s);
+    String s = "CO2 Meter!";  // Read HTML contents
+    req->send(200, "text/plain", s);
   });
-  server.on("/modbus", HTTP_GET, [](AsyncWebServerRequest *req) {
+  server.on("/co2meter", HTTP_POST, [](AsyncWebServerRequest *req) {
     if (printFin = true) {
       rtuWrite();
     }
