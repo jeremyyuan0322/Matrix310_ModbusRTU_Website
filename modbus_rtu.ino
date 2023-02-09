@@ -1,25 +1,19 @@
 #include "src/Artila-Matrix310.h"
-
-#include <arpa/inet.h>  //htons
 #include "src/crc16.h"
 #include "src/rtu.h"
-#include "AsyncJson.h"
-// #include <ESPAsyncWebServer.h>
+#include <arpa/inet.h>  //htons
 #include <WiFi.h>
-#include <string.h>
-#include <stdlib.h>
-#include <time.h>//?
 #include <NTPClient.h>
 #include <AsyncJson.h>
-#include <ArduinoJson.h>
-StaticJsonDocument<128> jsonDocument;
+
 WiFiUDP ntpUDP;
 //原本是格林威治時間，台灣+8(28800sec)
 NTPClient timeClient(ntpUDP, "tw.pool.ntp.org", 28800);
 const char *ssid = "Artila";
 const char *password = "CF25B34315";
 AsyncWebServer server(80);
-
+StaticJsonDocument<128> jsonDocument;
+JsonArray modbusToJson = jsonDocument.createNestedArray("modbusRead");
 bool printFin = true, writeFin = false;
 int readLen = 0;
 unsigned char slave_id, func;  //6 byte
@@ -41,6 +35,8 @@ struct modbus_read {
   u_int8_t rh[2];
   u_int8_t CRC[2];
 } mod_read;  // struct length: 11
+void wifiConnect();
+void addJsonObject(char *tag, float value, char *unit);
 
 void wifiConnect() {
   Serial.println();
@@ -60,38 +56,72 @@ void wifiConnect() {
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 }
+void addJsonObject(char *tag, float value, char *unit) {
+  
+  JsonObject meterData = modbusToJson.createNestedObject();
+  meterData["type"] = tag;
+  meterData["value"] = value;
+  meterData["unit"] = unit; 
+}
 void setupRouting(){
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *req) {
     String s = "CO2 Meter!";  // Read HTML contents
     req->send(200, "text/plain", s);
   });
-
-  // server.on("/co2meter", HTTP_POST, [](AsyncWebServerRequest *req) {
-    
-  //   req->send(200, "application/json", jsonStr);//co2不能大於1000
-  // });
-
   server.on("/json", HTTP_POST, [](AsyncWebServerRequest * request) {
+    String body = request->arg("plain");
+    DeserializationError error = deserializeJson(jsonDocument,body);
+    if(error){
+      request->send(400, "text/plain", "Invalid JSON");
+      return;
+    }
+    mod_write.slave_id = jsonDocument["slave_id"];//1U=1byte
+    mod_write.func = jsonDocument["func"];
+    *(u_int16_t*)mod_write.reg_addr = htons(jsonDocument["reg_addr"]);//2U
+    *(u_int16_t*)mod_write.read_count =  htons(jsonDocument["read_count"]);
 
-    AsyncJsonResponse * response = new AsyncJsonResponse();
-    JsonObject& root = response->getRoot();
-    root["key1"] = "key number one";
-    JsonObject& nested = root.createNestedObject("nested");
-    nested["key1"] = "key number one";
+    if (printFin = true)
+    {
+      rtuWrite();
+    }
+    if (writeFin = true)
+    {
+      rtuRead();
+    }
+    if (readLen > 0)
+    {
+      serialPrint();
+    }
+    float co2 = htons(*(u_int16_t *)(&mod_read.slave_id + 3));
+    float temp = htons(*(u_int16_t *)(&mod_read.slave_id + 5))/100.00;
+    float rh = htons(*(u_int16_t *)(&mod_read.slave_id + 7))/100.00;
+    jsonDocument.clear();
+    addJsonObject((char *)"CO2", co2, (char *)"ppm");
+    addJsonObject((char *)"TEMP", temp, (char *)"°C");
+    addJsonObject((char *)"RH", rh, (char *)"%");
+    jsonDocument["Device"] = "co2Meter";
+    jsonDocument["timeStamp"] = getTime();
+    String json;
+    serializeJson(jsonDocument, json);
 
-    response->setLength();
-    request->send(response);
+    request->send(200, "application/json", json);
   });
 
   server.on("/time", HTTP_GET, [](AsyncWebServerRequest *req) {
-    timeClient.update();  //NTP
-    // Serial.print("TIME: ");
-    String nowTime = timeClient.getFormattedTime();
-    // Serial.println(nowTime);
+    String nowTime = getTime();
     req->send(200, "text/plain", nowTime);
   });
 
   server.begin();
+}
+
+String getTime()
+{
+  timeClient.update();  //NTP
+    // Serial.print("TIME: ");
+    String nowTime = timeClient.getFormattedTime();
+    // Serial.println(nowTime);
+    return nowTime;
 }
 void rtuWrite() {
   if (Serial2.availableForWrite() >= 8) {
@@ -136,19 +166,7 @@ void rtuRead() {
     }
   }
 }
-void create_json(char *tag, float value, char *unit) {  
-  jsonDocument.clear();  
-  jsonDocument["type"] = tag;
-  jsonDocument["value"] = value;
-  jsonDocument["unit"] = unit;
-  serializeJson(jsonDocument, buffer);
-}
-void addJsonObject(char *tag, float value, char *unit) {
-  JsonObject obj = jsonDocument.createNestedObject();
-  obj["type"] = tag;
-  obj["value"] = value;
-  obj["unit"] = unit; 
-}
+
 void serialPrint() {
   Serial.print("data receive: ");
   Serial.println(readLen);
