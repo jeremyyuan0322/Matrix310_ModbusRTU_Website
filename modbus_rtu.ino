@@ -111,7 +111,13 @@ void setupRouting(){
     String nowTime = getTime();
     req->send(200, "text/plain", nowTime);
   });
-
+  server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+    if(!index)
+      Serial.printf("BodyStart: %u\n", total);
+    Serial.printf("%s", (const char*)data);
+    if(index + len == total)
+      Serial.printf("BodyEnd: %u\n", total);
+  });
   server.begin();
 }
 
