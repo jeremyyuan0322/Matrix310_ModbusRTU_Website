@@ -4,15 +4,17 @@
 #include <arpa/inet.h>  //htons
 #include <WiFi.h>
 #include <NTPClient.h>
-#include <AsyncJson.h>
+#include <ArduinoJson.h>
+#include <WebServer.h>
+
 
 WiFiUDP ntpUDP;
 //原本是格林威治時間，台灣+8(28800sec)
 NTPClient timeClient(ntpUDP, "tw.pool.ntp.org", 28800);
 const char *ssid = "Artila";
 const char *password = "CF25B34315";
-AsyncWebServer server(80);
-StaticJsonDocument<128> jsonDocument;
+WebServer server(80);
+StaticJsonDocument<256> jsonDocument;
 JsonArray modbusToJson = jsonDocument.createNestedArray("modbusRead");
 bool printFin = true, writeFin = false;
 int readLen = 0;
@@ -57,82 +59,70 @@ void wifiConnect() {
   Serial.println(WiFi.localIP());
 }
 void addJsonObject(char *tag, float value, char *unit) {
-  
+
   JsonObject meterData = modbusToJson.createNestedObject();
   meterData["type"] = tag;
   meterData["value"] = value;
-  meterData["unit"] = unit; 
+  meterData["unit"] = unit;
 }
-void setupRouting(){
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *req) {
-    String s = "CO2 Meter!";  // Read HTML contents
-    req->send(200, "text/plain", s);
-  });
-  server.on("/json", HTTP_POST, [](AsyncWebServerRequest * request) {
-    String body = request->arg("plain");
-    DeserializationError error = deserializeJson(jsonDocument,body);
-    if(error){
-      request->send(400, "text/plain", "Invalid JSON");
-      return;
-    }
-    mod_write.slave_id = jsonDocument["slave_id"];//1U=1byte
-    mod_write.func = jsonDocument["func"];
-    *(u_int16_t*)mod_write.reg_addr = htons(jsonDocument["reg_addr"]);//2U
-    *(u_int16_t*)mod_write.read_count =  htons(jsonDocument["read_count"]);
-
-    if (printFin = true)
-    {
-      rtuWrite();
-    }
-    if (writeFin = true)
-    {
-      rtuRead();
-    }
-    if (readLen > 0)
-    {
-      serialPrint();
-    }
-    float co2 = htons(*(u_int16_t *)(&mod_read.slave_id + 3));
-    float temp = htons(*(u_int16_t *)(&mod_read.slave_id + 5))/100.00;
-    float rh = htons(*(u_int16_t *)(&mod_read.slave_id + 7))/100.00;
-    jsonDocument.clear();
-    addJsonObject((char *)"CO2", co2, (char *)"ppm");
-    addJsonObject((char *)"TEMP", temp, (char *)"°C");
-    addJsonObject((char *)"RH", rh, (char *)"%");
-    jsonDocument["Device"] = "co2Meter";
-    jsonDocument["timeStamp"] = getTime();
-    String json;
-    serializeJson(jsonDocument, json);
-
-    request->send(200, "application/json", json);
-  });
-
-  server.on("/time", HTTP_GET, [](AsyncWebServerRequest *req) {
-    String nowTime = getTime();
-    req->send(200, "text/plain", nowTime);
-  });
-  server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
-    if(!index)
-      Serial.printf("BodyStart: %u\n", total);
-    Serial.printf("%s", (const char*)data);
-    if(index + len == total)
-      Serial.printf("BodyEnd: %u\n", total);
-  });
+void setupRouting() {
+  server.on("/", handleRoot);
+  server.on("/data", HTTP_POST, handleData);
+  // server.on("/time", getTime);
   server.begin();
 }
+void handleRoot() {
+  String s = "co2 meter";             // Read HTML contents
+  server.send(200, "text/plain", s);  // Send web page
+}
+void handleData() {
+  Serial.println("getdata");
+  if (server.hasArg("plain") == false) {
+    server.send(400, "text/plain", "Invalid JSON");
+    return;
+  }
+  String body = server.arg("plain");
+  // deserializeJson(jsonDocument, body);
 
-String getTime()
-{
+  // mod_write.slave_id = jsonDocument["slave_id"];  //1U=1byte
+  // mod_write.func = jsonDocument["func"];
+  // *(u_int16_t *)mod_write.reg_addr = htons(jsonDocument["reg_addr"]);  //2U
+  // *(u_int16_t *)mod_write.read_count = htons(jsonDocument["read_count"]);
+
+  // if (printFin = true) {
+  //   rtuWrite();
+  //   jsonDocument.clear();
+  // }
+  // if (writeFin = true) {
+  //   rtuRead();
+  // }
+  // if (readLen > 0) {
+  //   serialPrint();
+  // }
+  // float co2 = htons(*(u_int16_t *)(&mod_read.slave_id + 3));
+  // float temp = htons(*(u_int16_t *)(&mod_read.slave_id + 5)) / 100.00;
+  // float rh = htons(*(u_int16_t *)(&mod_read.slave_id + 7)) / 100.00;
+  // addJsonObject((char *)"CO2", co2, (char *)"ppm");
+  // addJsonObject((char *)"TEMP", temp, (char *)"°C");
+  // addJsonObject((char *)"RH", rh, (char *)"%");
+  // jsonDocument["Device"] = "co2Meter";
+  // jsonDocument["timeStamp"] = getTime();
+  // String json;
+  // serializeJson(jsonDocument, json);
+  server.send(200, "application/json", body);
+}
+
+String getTime() {
   timeClient.update();  //NTP
-    // Serial.print("TIME: ");
-    String nowTime = timeClient.getFormattedTime();
-    // Serial.println(nowTime);
-    return nowTime;
+  // Serial.print("TIME: ");
+  String nowTime = timeClient.getFormattedTime();
+  // Serial.println(nowTime);
+  return nowTime;
 }
 void rtuWrite() {
   if (Serial2.availableForWrite() >= 8) {
     unsigned short crc;
-    crc = do_crc_table(&mod_write.slave_id, sizeof(mod_write) - 2);
+    crc = do_crc(&mod_write.slave_id, sizeof(mod_write) - 2);
     Serial.print("writeCRC: ");
     Serial.println(crc, HEX);
     *(u_int16_t *)mod_write.CRC = crc;
@@ -165,7 +155,7 @@ void rtuRead() {
       digitalWrite(COM1_RTS, HIGH);  // write
       delay(1);
       break;
-    } 
+    }
     if (millis() - RS485Timeout > 1000) {
       Serial.println("read nothing!");
       break;
@@ -213,7 +203,8 @@ void setup() {
   wifiConnect();
   timeClient.begin();
   setupRouting();
-
 }
 void loop() {
+  server.handleClient();
+  delay(2);
 }
