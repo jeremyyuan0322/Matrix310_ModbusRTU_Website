@@ -7,16 +7,14 @@
 #include <ArduinoJson.h>
 #include <WebServer.h>
 
-
 WiFiUDP ntpUDP;
 //原本是格林威治時間，台灣+8(28800sec)
 NTPClient timeClient(ntpUDP, "tw.pool.ntp.org", 28800);
 const char *ssid = "Artila";
 const char *password = "CF25B34315";
 WebServer server(80);
-StaticJsonDocument<256> jsonDocument;
-JsonArray modbusToJson = jsonDocument.createNestedArray("modbusRead");
-bool printFin = true, writeFin = false;
+StaticJsonDocument<512> jsonDocument;
+bool printFin = true, writeFin = false;//flag不要亂動 就是這樣！！
 int readLen = 0;
 unsigned char slave_id, func;  //6 byte
 unsigned short reg_addr, read_count;
@@ -58,17 +56,17 @@ void wifiConnect() {
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 }
-void addJsonObject(char *tag, float value, char *unit) {
 
-  JsonObject meterData = modbusToJson.createNestedObject();
-  meterData["type"] = tag;
-  meterData["value"] = value;
-  meterData["unit"] = unit;
+void addJsonObject(JsonArray modbusToJson, char *tag, char *value, char *unit) {
+  JsonObject modbus = modbusToJson.createNestedObject();
+  modbus["type"] = tag;
+  modbus["value"] = value;
+  modbus["unit"] = unit;
 }
+
 void setupRouting() {
   server.on("/", handleRoot);
   server.on("/data", HTTP_POST, handleData);
-  // server.on("/time", getTime);
   server.begin();
 }
 void handleRoot() {
@@ -76,40 +74,52 @@ void handleRoot() {
   server.send(200, "text/plain", s);  // Send web page
 }
 void handleData() {
-  Serial.println("getdata");
+  Serial.println("get request with JSON");
   if (server.hasArg("plain") == false) {
     server.send(400, "text/plain", "Invalid JSON");
     return;
   }
   String body = server.arg("plain");
-  // deserializeJson(jsonDocument, body);
+  //Before reading the input using deserializeJson(), this function resets the document, so you don’t need to call JsonDocument::clear().
+  deserializeJson(jsonDocument, body);
+  
+  mod_write.slave_id = jsonDocument["slave_id"].as<u_int8_t>();  //1U=1byte
+  mod_write.func = jsonDocument["func"].as<u_int8_t>();
+  *(u_int16_t *)mod_write.reg_addr = htons(strtol((jsonDocument["reg_addr"].as<String>()).c_str(), NULL, 16));  //2U, use strtol() to transfer to HEX
+  *(u_int16_t *)mod_write.read_count = htons(strtol((jsonDocument["read_count"].as<String>()).c_str(), NULL, 16));
 
-  // mod_write.slave_id = jsonDocument["slave_id"];  //1U=1byte
-  // mod_write.func = jsonDocument["func"];
-  // *(u_int16_t *)mod_write.reg_addr = htons(jsonDocument["reg_addr"]);  //2U
-  // *(u_int16_t *)mod_write.read_count = htons(jsonDocument["read_count"]);
+  if (printFin = true) {
+    rtuWrite();
+    jsonDocument.clear();//write完先清空給read用
+  }
+  if (writeFin = true) {
+    rtuRead();
+  }
+  if (readLen > 0) {
+    serialPrint();
+  }
+  // char *co2ToStr = malloc(10 * sizeof(char));//用完記得free(co2ToStr);
+  char co2ToStr[10];
+  char tempToStr[10];
+  char rhToStr[10];
+  u_int16_t co2 = htons(*(u_int16_t *)(&mod_read.slave_id + 3));
+  float temp = htons(*(u_int16_t *)(&mod_read.slave_id + 5)) / 100.0;
+  float rh = htons(*(u_int16_t *)(&mod_read.slave_id + 7)) / 100.0;
+  sprintf(co2ToStr, "%d", co2);
+  sprintf(tempToStr, "%.2f", temp);
+  sprintf(rhToStr, "%.2f", rh);
 
-  // if (printFin = true) {
-  //   rtuWrite();
-  //   jsonDocument.clear();
-  // }
-  // if (writeFin = true) {
-  //   rtuRead();
-  // }
-  // if (readLen > 0) {
-  //   serialPrint();
-  // }
-  // float co2 = htons(*(u_int16_t *)(&mod_read.slave_id + 3));
-  // float temp = htons(*(u_int16_t *)(&mod_read.slave_id + 5)) / 100.00;
-  // float rh = htons(*(u_int16_t *)(&mod_read.slave_id + 7)) / 100.00;
-  // addJsonObject((char *)"CO2", co2, (char *)"ppm");
-  // addJsonObject((char *)"TEMP", temp, (char *)"°C");
-  // addJsonObject((char *)"RH", rh, (char *)"%");
-  // jsonDocument["Device"] = "co2Meter";
-  // jsonDocument["timeStamp"] = getTime();
-  // String json;
-  // serializeJson(jsonDocument, json);
-  server.send(200, "application/json", body);
+  jsonDocument["Device"] = "co2Meter";
+  jsonDocument["timeStamp"] = getTime();
+  JsonArray modbusToJson = jsonDocument.createNestedArray("modbusRead");
+
+  addJsonObject(modbusToJson ,(char *)"CO2", co2ToStr, (char *)"ppm");
+  addJsonObject(modbusToJson ,(char *)"TEMP", tempToStr, (char *)"°C");
+  addJsonObject(modbusToJson ,(char *)"RH", rhToStr, (char *)"%");
+
+  String json;
+  serializeJson(jsonDocument, json);
+  server.send(200, "application/json", json);
 }
 
 String getTime() {
@@ -139,8 +149,8 @@ void rtuWrite() {
     delay(1);
     Serial.print("data send: ");
     Serial.println(writeLen);
-    printFin = false;
-    writeFin = true;
+    printFin = false;//在全部read完之後才會改為ture然後print
+    writeFin = true;//wrtie結束，接下來一直read
   }
 }
 void rtuRead() {
@@ -150,7 +160,7 @@ void rtuRead() {
       readLen = Serial2.readBytes((byte *)&mod_read, sizeof(mod_read));
       Serial2.flush();
       if (readLen > 0) {
-        writeFin = false;
+        writeFin = false;//有收到東西之後可以write
       }
       digitalWrite(COM1_RTS, HIGH);  // write
       delay(1);
@@ -167,7 +177,7 @@ void serialPrint() {
   Serial.print("data receive: ");
   Serial.println(readLen);
   for (int i = 0; i < readLen; i++) {
-    Serial.print(*(byte *)(&mod_read.slave_id + i), HEX);
+    Serial.print(*(byte *)(&mod_read.slave_id + i), DEC);
     Serial.print(" ");
   }
   Serial.println("");
@@ -206,5 +216,5 @@ void setup() {
 }
 void loop() {
   server.handleClient();
-  delay(2);
+  delay(1);
 }
