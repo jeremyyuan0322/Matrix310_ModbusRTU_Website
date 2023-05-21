@@ -173,7 +173,7 @@ void rtuRead() {
   }
 }
 
-void serialPrint() {
+void serialPrint() { 
   Serial.print("data receive: ");
   Serial.println(readLen);
   for (int i = 0; i < readLen; i++) {

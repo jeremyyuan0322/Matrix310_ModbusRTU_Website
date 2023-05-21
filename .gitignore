@@ -13,7 +13,7 @@
 .vs/
 __vm/
 *.vcxproj*
-.vscode/
+#.vscode/
 platform.sloeber.txt
 boards.sloeber.txt
 
